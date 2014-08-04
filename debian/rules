@@ -1,0 +1,33 @@
+#!/usr/bin/make -f
+# -*- makefile -*-
+
+# This has to be exported to make some magic below work.
+export DH_OPTIONS
+
+%:
+	dh $@
+
+# Build the binary and docs.
+# Also all tests available will run here BEFORE the build because
+# during tests 'clean' target is called (debhelper runs
+# the dh_auto_test target after the dh_auto_build target).
+override_dh_auto_build:
+#	$(MAKE) all-tests
+	$(MAKE) clean compile
+	$(MAKE) html
+
+# Do not run any tests after the build
+# (see override_dh_auto_build comment for details)
+override_dh_auto_test:
+
+# Implement staged installation
+DESTDIR = debian/erlang-kafka
+DOC_DESTDIR = debian/erlang-kafka-doc
+VERSION = $(shell cat version)
+ERL_APP_DESTDIR = $(DESTDIR)/usr/lib/erlang/lib/kafka-$(VERSION)/ebin
+override_dh_install:
+	install -m 755 -d $(ERL_APP_DESTDIR)
+	install -m 640 ebin/*.app ebin/*.beam $(ERL_APP_DESTDIR)
+	install -m 755 -d $(DOC_DESTDIR)/usr/share/doc/erlang-kafka-doc
+	install -m 644 doc/*.html doc/*.css doc/*.png \
+	    $(DOC_DESTDIR)/usr/share/doc/erlang-kafka-doc

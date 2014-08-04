@@ -1,0 +1,13 @@
+@author Aleksey Morarash <aleksey.morarash@proffero.com>
+@copyright 2014 Proffero
+@version {{VERSION}}
+@title Welcome to Erlang Client to the Apache Kafka 0.8.x.
+@doc == Contents ==
+
+<ol>
+ <li>{@section Summary}</li>
+</ol>
+
+== Summary ==
+
+Provides an Erlang API to the Apache Kafka 0.8.x cluster.

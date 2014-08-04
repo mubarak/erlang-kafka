@@ -1,0 +1,12 @@
+%%% @author Aleksey Morarash <aleksey.morarash@proffero.com>
+%%% @since 4 Aug 2014
+%%% @copyright 2014, Proffero
+%%% @doc kafka application resource file
+
+{application, kafka,
+ [
+  {description,  "Apache Kafka 0.8.x Client"},
+  {vsn,          "{{VERSION}}"},
+  {modules,      [kafka]},
+  {applications, []}
+ ]}.

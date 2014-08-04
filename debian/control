@@ -1,0 +1,21 @@
+Source: erlang-kafka
+Section: devel
+Priority: extra
+Maintainer: Aleksey Morarash <aleksey.morarash@proffero.com>
+Build-Depends: debhelper (>= 8.0.0), erlang-base, erlang-dev, erlang-tools,
+ erlang-edoc, erlang-eunit, erlang-dialyzer
+Standards-Version: 3.9.3
+Homepage: https://github.com/Proffero/erlang-kafka
+Vcs-Browser: https://github.com/Proffero/erlang-kafka
+Vcs-Git: https://github.com/Proffero/erlang-kafka.git
+
+Package: erlang-kafka
+Architecture: all
+Depends: erlang-base
+Description: Erlang client for the Apache Kafka 0.8.x
+ Erlang client for the Apache Kafka 0.8.x.
+
+Package: erlang-kafka-doc
+Architecture: all
+Description: Apache Kafka Erlang client documentation.
+ Contains generated HTML documentation for the client source code.
