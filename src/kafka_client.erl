@@ -149,18 +149,19 @@ reconnect(OldState) ->
              };
         error ->
             %% no alive brokers found. Reschedule connection later
-            reschedule_reconnect(OldState)
+            ok = schedule_reconnect(),
+            OldState#state{
+              sockets = [],
+              metadata = undefined
+             }
     end.
 
 %% @doc Reschedule reconnect later.
--spec reschedule_reconnect(OldState :: #state{}) -> NewState :: #state{}.
-reschedule_reconnect(OldState) ->
+-spec schedule_reconnect() -> ok.
+schedule_reconnect() ->
     {ok, _TRef} =
         timer:apply_after(?CONNECT_RETRY_PERIOD, ?MODULE, hup, []),
-    OldState#state{
-      sockets = [],
-      metadata = undefined
-     }.
+    ok.
 
 %% @doc Try to read metadata from any available broker.
 -spec get_metadata_from_first_available_broker(
