@@ -113,6 +113,12 @@ handle_cast(_Request, State) ->
 %% @hidden
 -spec handle_info(Info :: any(), State :: #state{}) ->
                          {noreply, State :: #state{}}.
+handle_info({tcp_closed, Socket}, State) ->
+    NewState = disconnect_broker(State, Socket),
+    {noreply, NewState};
+handle_info({tcp_error, Socket, _Reason}, State) ->
+    NewState = disconnect_broker(State, Socket),
+    {noreply, NewState};
 handle_info(_Request, State) ->
     {noreply, State}.
 
@@ -319,3 +325,21 @@ is_all_brokers_connected(List) ->
          (_) ->
               false
       end, List).
+
+%% @doc Close selected socket, schedule broker reconnection
+%% and update process internal state.
+-spec disconnect_broker(OldState :: #state{},
+                        SocketToClose :: port()) ->
+                               NewState :: #state{}.
+disconnect_broker(OldState, SocketToClose) ->
+    NewSockets =
+        lists:map(
+          fun({BrokerId, Socket}) when Socket == SocketToClose ->
+                  ?trace("broker #~s disconnected", [BrokerId]),
+                  ok = gen_tcp:close(Socket),
+                  {BrokerId, undefined};
+             (SocketItem) ->
+                  SocketItem
+          end, OldState#state.sockets),
+    ok = schedule_broker_reconnect(),
+    OldState#state{sockets = NewSockets}.
