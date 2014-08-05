@@ -39,6 +39,17 @@
 %% to tell the client to reconnect and reread metadata
 -define(HUP, '*hup*').
 
+%% to tell the client to reconnect the disconnected brokers
+-define(RECONNECT, '*reconnect*').
+
+%% --------------------------------------------------------------------
+%% Type definitions
+%% --------------------------------------------------------------------
+
+-type socket_item() ::
+        {BrokerId :: kafka_proto:broker_id(),
+         Socket :: port() | undefined}.
+
 %% --------------------------------------------------------------------
 %% API functions
 %% --------------------------------------------------------------------
@@ -71,7 +82,7 @@ hup(Pid) ->
    state,
    {brokers = [] :: [kafka:broker()],
     options = [] :: [kafka:option()],
-    sockets = [] :: [port()],
+    sockets = [] :: [socket_item()],
     metadata :: #metadata_response{}
    }).
 
@@ -92,6 +103,9 @@ init({Brokers, Options}) ->
                          {noreply, NewState :: #state{}}.
 handle_cast(?HUP, State) ->
     NewState = reconnect(State),
+    {noreply, NewState};
+handle_cast(?RECONNECT, State) ->
+    NewState = reconnect_brokers(State),
     {noreply, NewState};
 handle_cast(_Request, State) ->
     {noreply, State}.
@@ -135,18 +149,15 @@ reconnect(OldState) ->
     case get_metadata_from_first_available_broker(OldState#state.brokers) of
         {ok, Metadata} ->
             %% open TCP connections to all discovered brokers
-            TcpOpts = [binary, {packet, 4}, {active, true}],
-            Sockets =
-                [Socket ||
-                    {ok, Socket} <-
-                        [gen_tcp:connect(
-                           Host, Port, TcpOpts, ?CONNECT_TIMEOUT) ||
-                            {_NodeId, Host, Port} <-
-                                Metadata#metadata_response.brokers]],
-            OldState#state{
-              sockets = Sockets,
-              metadata = Metadata
-             };
+            SocketItems =
+                [{BrokerId, _Socket = undefined} ||
+                    {BrokerId, _Host, _Port} <-
+                        Metadata#metadata_response.brokers],
+            reconnect_brokers(
+              OldState#state{
+                sockets = SocketItems,
+                metadata = Metadata
+               });
         error ->
             %% no alive brokers found. Reschedule connection later
             ok = schedule_reconnect(),
@@ -239,3 +250,72 @@ get_metadata(Socket) ->
 -spec gen_corellation_id() -> kafka_proto:int32().
 gen_corellation_id() ->
     random:uniform(16#ffffffff + 1) - 2147483648 - 1.
+
+%% @doc Reconnect disconnected brokers.
+%% Will try to connect each broker when second element of
+%% socket_item (in #state.sockets list) is not an open port.
+%% If at least one broker remains unconnected, the function
+%% will schedule next reconnect attempt later.
+-spec reconnect_brokers(OldState :: #state{}) ->
+                               NewState :: #state{}.
+reconnect_brokers(OldState) ->
+    Brokers = (OldState#state.metadata)#metadata_response.brokers,
+    NewSockets =
+        lists:map(
+          fun({_BrokerId, Socket} = SocketItem) when is_port(Socket) ->
+                  %% already connected
+                  SocketItem;
+             ({BrokerId, _NotASocket}) ->
+                  %% need to reconnect
+                  {BrokerId, Host, Port} =
+                      lists:keyfind(BrokerId, 1, Brokers),
+                  {BrokerId, connect_broker(Host, Port)}
+          end, OldState#state.sockets),
+    case is_all_brokers_connected(NewSockets) of
+        true ->
+            ok;
+        false ->
+            ok = schedule_broker_reconnect()
+    end,
+    OldState#state{sockets = NewSockets}.
+
+%% @doc Schedule broker reconnection task.
+-spec schedule_broker_reconnect() -> ok.
+schedule_broker_reconnect() ->
+    {ok, _TRef} =
+        timer:apply_after(
+          ?BROKER_CONNECT_RETRY_PERIOD,
+          gen_server, cast, [self(), ?RECONNECT]),
+    ok.
+
+%% @doc Try to establish a TCP connection to a broker.
+-spec connect_broker(Host :: string(), Port :: inet:port_number()) ->
+                            Socket :: port() | undefined.
+connect_broker(Host, Port) ->
+    %% Important note:
+    %% {packet,4} option implies that the packet header is unsigned
+    %% big endian, but Kafka protocol encodes the packet length as
+    %% int32, which is SIGNED big endian.
+    TcpOpts = [binary, {packet, 4}, {active, true}],
+    ?trace("connecting to ~s:~w...", [Host, Port]),
+    case gen_tcp:connect(Host, Port, TcpOpts, ?CONNECT_TIMEOUT) of
+        {ok, Socket} ->
+            ?trace("connected to ~s:~w", [Host, Port]),
+            Socket;
+        {error, _Reason} ->
+            ?trace(
+               "failed to connect to ~s:~w: ~999p",
+               [Host, Port, _Reason]),
+            undefined
+    end.
+
+%% @doc Return false if there is at least one not connected broker.
+-spec is_all_brokers_connected(SocketItems :: [socket_item()]) ->
+                                      boolean().
+is_all_brokers_connected(List) ->
+    lists:all(
+      fun({_BrokerId, Socket}) when is_port(Socket) ->
+              true;
+         (_) ->
+              false
+      end, List).

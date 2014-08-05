@@ -10,6 +10,7 @@
 
 -define(CONNECT_TIMEOUT, 2000). %% two seconds
 -define(CONNECT_RETRY_PERIOD, 5000). %% five seconds
+-define(BROKER_CONNECT_RETRY_PERIOD, 5000). %% five seconds
 -define(RESPONSE_READ_TIMEOUT, 10000). %% ten seconds
 
 %% ----------------------------------------------------------------------
