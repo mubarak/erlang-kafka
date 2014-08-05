@@ -1,6 +1,6 @@
 %%% @author Aleksey Morarash <aleksey.morarash@proffero.com>
 %%% @since 4 Aug 2014
-%%% @copyright 2014, Proffero
+%%% @copyright 2014, Proffero <info@proffero.com>
 %%% @doc kafka application resource file
 
 {application, kafka,

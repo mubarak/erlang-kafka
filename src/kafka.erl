@@ -3,7 +3,7 @@
 
 %%% @author Aleksey Morarash <aleksey.morarash@proffero.com>
 %%% @since 04 Aug 2014
-%%% @copyright 2014, Proffero
+%%% @copyright 2014, Proffero <info@proffero.com>
 
 -module(kafka).
 
