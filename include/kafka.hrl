@@ -40,7 +40,8 @@
 -define(
    trace(Format, Args),
    ok = io:format(
-          "TRACE> pid:~w; msg:" ++ Format ++ "~n", [self() | Args]
+          "TRACE> mod:~w; line:~w; pid:~w; msg:" ++ Format ++ "~n",
+          [?MODULE, ?LINE, self() | Args]
          )).
 -else.
 -define(trace(F, A), ok).
