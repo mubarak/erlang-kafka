@@ -9,6 +9,19 @@
 -define(_KAFKA, true).
 
 %% ----------------------------------------------------------------------
+%% debugging
+
+-ifdef(TRACE).
+-define(
+   trace(Format, Args),
+   ok = io:format(
+          "TRACE> pid:~w; msg:" ++ Format ++ "~n", [self() | Args]
+         )).
+-else.
+-define(trace(F, A), ok).
+-endif.
+
+%% ----------------------------------------------------------------------
 %% eunit
 
 -ifdef(TEST).
