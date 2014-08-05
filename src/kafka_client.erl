@@ -89,6 +89,7 @@ hup(Pid) ->
 %% @hidden
 -spec init(Args :: any()) -> {ok, InitialState :: #state{}}.
 init({Brokers, Options}) ->
+    ?trace("init(~9999p)", [{Brokers, Options}]),
     %% schedule reconnect immediately after the start but
     %% not in the init/1 fun, to not block caller process.
     ok = hup(self()),
@@ -108,26 +109,32 @@ handle_cast(?RECONNECT, State) ->
     NewState = reconnect_brokers(State),
     {noreply, NewState};
 handle_cast(_Request, State) ->
+    ?trace("unknown cast message:~n\t~p", [_Request]),
     {noreply, State}.
 
 %% @hidden
 -spec handle_info(Info :: any(), State :: #state{}) ->
                          {noreply, State :: #state{}}.
 handle_info({tcp_closed, Socket}, State) ->
+    ?trace("socket ~w was closed", [Socket]),
     NewState = disconnect_broker(State, Socket),
     {noreply, NewState};
 handle_info({tcp_error, Socket, _Reason}, State) ->
+    ?trace("tcp_error occured for ~w: ~999p", [Socket, _Reason]),
     NewState = disconnect_broker(State, Socket),
     {noreply, NewState};
 handle_info(_Request, State) ->
+    ?trace("unknown info message:~n\t~p", [_Request]),
     {noreply, State}.
 
 %% @hidden
 -spec handle_call(Request :: any(), From :: any(), State :: #state{}) ->
                          {noreply, NewState :: #state{}}.
 handle_call(?STOP, _From, State) ->
+    ?trace("stopping...", []),
     {stop, _Reason = shutdown, _Reply = ok, State};
 handle_call(_Request, _From, State) ->
+    ?trace("unknown call from ~w:~n\t~p", [_From, _Request]),
     {noreply, State}.
 
 %% @hidden
@@ -148,12 +155,14 @@ code_change(_OldVsn, State, _Extra) ->
 %% @doc Reconnect and reread metadata from any broker.
 -spec reconnect(OldState :: #state{}) -> NewState :: #state{}.
 reconnect(OldState) ->
+    ?trace("reconnecting...", []),
     _OldSeed = random:seed(now()),
     %% close all opened TCP sockets
     ok = lists:foreach(fun gen_tcp:close/1, OldState#state.sockets),
     %% find first available broker
     case get_metadata_from_first_available_broker(OldState#state.brokers) of
         {ok, Metadata} ->
+            ?trace("got metadata:~n\t~p", [Metadata]),
             %% open TCP connections to all discovered brokers
             SocketItems =
                 [{BrokerId, _Socket = undefined} ||
@@ -176,6 +185,7 @@ reconnect(OldState) ->
 %% @doc Reschedule reconnect later.
 -spec schedule_reconnect() -> ok.
 schedule_reconnect() ->
+    ?trace("total reconnect scheduled", []),
     {ok, _TRef} =
         timer:apply_after(?CONNECT_RETRY_PERIOD, ?MODULE, hup, []),
     ok.
@@ -191,8 +201,12 @@ get_metadata_from_first_available_broker([{Address, PortNumber} | Tail]) ->
     %% big endian, but Kafka protocol encodes the packet length as
     %% int32, which is SIGNED big endian.
     TcpOpts = [binary, {packet, 4}, {reuseaddr, true}, {active, false}],
+    ?trace("bootstrap: connecting to ~999p:~w...", [Address, PortNumber]),
     case gen_tcp:connect(Address, PortNumber, TcpOpts, ?CONNECT_TIMEOUT) of
         {ok, Socket} ->
+            ?trace(
+               "bootstrap: asking metadata from ~999p:~w...",
+               [Address, PortNumber]),
             case get_metadata(Socket) of
                 {ok, _Metadata} = Ok ->
                     ok = gen_tcp:close(Socket),
@@ -202,6 +216,9 @@ get_metadata_from_first_available_broker([{Address, PortNumber} | Tail]) ->
                     get_metadata_from_first_available_broker(Tail)
             end;
         {error, _Reason} ->
+            ?trace(
+               "bootstrap: failed to connect to ~999p:~w: ~999p",
+               [Address, PortNumber, _Reason]),
             get_metadata_from_first_available_broker(Tail)
     end.
 
@@ -265,6 +282,7 @@ gen_corellation_id() ->
 -spec reconnect_brokers(OldState :: #state{}) ->
                                NewState :: #state{}.
 reconnect_brokers(OldState) ->
+    ?trace("reconnecting brokers...", []),
     Brokers = (OldState#state.metadata)#metadata_response.brokers,
     NewSockets =
         lists:map(
@@ -279,7 +297,7 @@ reconnect_brokers(OldState) ->
           end, OldState#state.sockets),
     case is_all_brokers_connected(NewSockets) of
         true ->
-            ok;
+            ?trace("all brokers are connected", []);
         false ->
             ok = schedule_broker_reconnect()
     end,
@@ -288,6 +306,7 @@ reconnect_brokers(OldState) ->
 %% @doc Schedule broker reconnection task.
 -spec schedule_broker_reconnect() -> ok.
 schedule_broker_reconnect() ->
+    ?trace("brokers reconnect scheduled", []),
     {ok, _TRef} =
         timer:apply_after(
           ?BROKER_CONNECT_RETRY_PERIOD,
