@@ -47,6 +47,9 @@
     value :: any()
    }).
 
+-type metadata_request() ::
+        [TopicName :: string()].
+
 -record(
    request,
    {
@@ -75,7 +78,7 @@
      %% as a logical grouping across all requests from a particular
      %% client.
      client_id :: string(),
-     message :: #message{} | #message_set{} | string()
+     message :: metadata_request()
    }).
 
 -record(
