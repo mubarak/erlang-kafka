@@ -128,6 +128,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% @doc Reconnect and reread metadata from any broker.
 -spec reconnect(OldState :: #state{}) -> NewState :: #state{}.
 reconnect(OldState) ->
+    _OldSeed = random:seed(now()),
     %% close all opened TCP sockets
     ok = lists:foreach(fun gen_tcp:close/1, OldState#state.sockets),
     %% find first available broker
