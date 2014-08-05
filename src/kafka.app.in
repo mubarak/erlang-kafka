@@ -8,6 +8,7 @@
   {description,  "Apache Kafka 0.8.x Client"},
   {vsn,          "{{VERSION}}"},
   {modules,      [kafka,
+                  kafka_client,
                   kafka_proto
                  ]}
  ]}.
