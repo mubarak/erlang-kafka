@@ -9,6 +9,26 @@
 -define(_KAFKA, true).
 
 %% ----------------------------------------------------------------------
+%% error reasons
+
+-define(bad_brokers, bad_brokers).
+-define(bad_broker, bad_broker).
+-define(bad_options, bad_options).
+-define(bad_option, bad_option).
+
+%% ----------------------------------------------------------------------
+%% guards
+
+-define(is_uint8(I),
+        (is_integer(I) andalso I >= 0 andalso I =< 16#ff)).
+
+-define(is_uint16(I),
+        (is_integer(I) andalso I >= 0 andalso I =< 16#ffff)).
+
+-define(is_port_number(I),
+        (is_integer(I) andalso I > 0 andalso I =< 16#ffff)).
+
+%% ----------------------------------------------------------------------
 %% debugging
 
 -ifdef(TRACE).
