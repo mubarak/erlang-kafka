@@ -28,6 +28,7 @@
     compression/0,
     brokers/0,
     broker/0,
+    broker_id/0,
     topics/0,
     topic/0,
     partition_metadata/0
@@ -52,9 +53,11 @@
 -type brokers() :: [broker()].
 
 -type broker() ::
-        {NodeId :: int32(),
+        {NodeId :: broker_id(),
          Host :: string(),
          Port :: int32()}.
+
+-type broker_id() :: int32().
 
 -type topics() :: [topic()].
 
