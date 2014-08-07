@@ -643,6 +643,5 @@ do_async_request(Socket, Request) ->
         ok ->
             ok;
         {error, _Reason} ->
-            ?trace("failed to send request: ~999p", [_Reason]),
-            ok
+            ?trace("failed to send request: ~999p", [_Reason])
     end.
