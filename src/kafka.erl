@@ -14,6 +14,7 @@
 %% API exports
 -export(
    [start_link/2,
+    start_link/3,
     close/1
    ]).
 
@@ -49,17 +50,29 @@
                  Options :: [option()]) ->
                         {ok, Pid :: pid()} |
                         {error, Reason :: error_reason()}.
-start_link([], _Options) ->
-    {error, ?bad_brokers};
 start_link(Brokers, Options) ->
-    case check_brokers(Brokers) of
+    case check_start_args(Brokers, Options) of
         ok ->
-            case check_options(Options) of
-                ok ->
-                    kafka_client:start_link(Brokers, Options);
-                {error, _Reason} = Error ->
-                    Error
-            end;
+            kafka_client:start_link(Brokers, Options);
+        {error, _Reason} = Error ->
+            Error
+    end.
+
+%% @doc Start an named Kafka client in a linked process.
+%% Purpose of ServerName argument you can find at
+%% the gen_server:start_link/4 function description.
+-spec start_link(ServerName ::
+                   {local, Name :: atom()} |
+                   {global, GlobalName :: atom()} |
+                   {via, Module :: atom(), ViaName :: atom()},
+                 Brokers :: [broker()],
+                 Options :: [option()]) ->
+                        {ok, Pid :: pid()} |
+                        {error, Reason :: error_reason()}.
+start_link(ServerName, Brokers, Options) ->
+    case check_start_args(Brokers, Options) of
+        ok ->
+            kafka_client:start_link(ServerName, Brokers, Options);
         {error, _Reason} = Error ->
             Error
     end.
@@ -72,6 +85,25 @@ close(Pid) when is_pid(Pid) ->
 %% --------------------------------------------------------------------
 %% Internal functions
 %% --------------------------------------------------------------------
+
+%% @doc Check start args.
+-spec check_start_args(Broker :: [broker()],
+                       Options :: [option()]) ->
+                              ok |
+                              {error,
+                               ?bad_broker(any()) |
+                               ?bad_brokers |
+                               ?bad_option(any()) |
+                               ?bad_options}.
+check_start_args([], _Options) ->
+    {error, ?bad_brokers};
+check_start_args(Brokers, Options) ->
+    case check_brokers(Brokers) of
+        ok ->
+            check_options(Options);
+        {error, _Reason} = Error ->
+            Error
+    end.
 
 %% @doc Check the broker list.
 -spec check_brokers(Brokers :: [broker()]) ->

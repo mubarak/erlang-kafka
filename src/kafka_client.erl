@@ -12,6 +12,7 @@
 %% API exports
 -export(
    [start_link/2,
+    start_link/3,
     stop/1,
     hup/1,
     metadata/1,
@@ -64,7 +65,22 @@
                         {error, Reason :: any()}.
 start_link(Brokers, Options) ->
     gen_server:start_link(
-      {local, ?MODULE}, ?MODULE, _Args = {Brokers, Options},
+      ?MODULE, _Args = {Brokers, Options}, _Options = []).
+
+%% @doc Start the named linked process.
+%% Purpose of ServerName argument you can find at
+%% the gen_server:start_link/4 function description.
+-spec start_link(ServerName ::
+                   {local, Name :: atom()} |
+                   {global, GlobalName :: atom()} |
+                   {via, Module :: atom(), ViaName :: atom()},
+                 Brokers :: [kafka:broker()],
+                 Options :: [kafka:option()]) ->
+                        {ok, Pid :: pid()} |
+                        {error, Reason :: any()}.
+start_link(ServerName, Brokers, Options) ->
+    gen_server:start_link(
+      ServerName, ?MODULE, _Args = {Brokers, Options},
       _Options = []).
 
 %% @doc Stop the client.
