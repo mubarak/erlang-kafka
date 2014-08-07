@@ -13,18 +13,14 @@
 -export(
    [start_link/2,
     stop/1,
-    hup/1
+    hup/1,
+    metadata/1,
+    produce/5
    ]).
 
 %% gen_server callback exports
 -export([init/1, handle_call/3, handle_info/2, handle_cast/2,
          terminate/2, code_change/3]).
-
-%% testing exports
--export(
-   [get_metadata_from_first_available_broker/1,
-    get_metadata/1
-   ]).
 
 -include("kafka.hrl").
 -include("kafka_proto.hrl").
@@ -42,12 +38,18 @@
 %% to tell the client to reconnect the disconnected brokers
 -define(RECONNECT, '*reconnect*').
 
+%% to make a metadata request
+-define(METADATA, '*metadata*').
+
+%% to make a produce request
+-define(PRODUCE, '*produce*').
+
 %% --------------------------------------------------------------------
 %% Type definitions
 %% --------------------------------------------------------------------
 
 -type socket_item() ::
-        {BrokerId :: kafka_proto:broker_id(),
+        {BrokerId :: broker_id(),
          Socket :: port() | undefined}.
 
 %% --------------------------------------------------------------------
@@ -74,6 +76,23 @@ stop(Pid) ->
 hup(Pid) ->
     gen_server:cast(Pid, ?HUP).
 
+%% @doc Send a produce request.
+-spec metadata(Pid :: pid()) ->
+                      {ok, metadata_response()} |
+                      {error, Reason :: any()}.
+metadata(Pid) ->
+    gen_server:call(Pid, ?METADATA).
+
+%% @doc Send a produce request.
+-spec produce(Pid :: pid(),
+              BrokerId :: auto | broker_id(),
+              RequiredAcks :: produce_request_required_acks(),
+              Timeout :: produce_request_timeout(),
+              Topics :: produce_request_topics()) ->
+                     ok | {error, Reason :: any()}.
+produce(Pid, BrokerId, RequiredAcks, Timeout, Topics) ->
+    gen_server:call(Pid, {?PRODUCE, BrokerId, RequiredAcks, Timeout, Topics}).
+
 %% ----------------------------------------------------------------------
 %% gen_server callbacks
 %% ----------------------------------------------------------------------
@@ -83,7 +102,7 @@ hup(Pid) ->
    {brokers = [] :: [kafka:broker()],
     options = [] :: [kafka:option()],
     sockets = [] :: [socket_item()],
-    metadata :: #metadata_response{}
+    metadata :: metadata_response()
    }).
 
 %% @hidden
@@ -130,6 +149,13 @@ handle_info(_Request, State) ->
 %% @hidden
 -spec handle_call(Request :: any(), From :: any(), State :: #state{}) ->
                          {noreply, NewState :: #state{}}.
+handle_call(?METADATA, _From, State) ->
+    {Reply, NewState} = handle_metadata(State),
+    {reply, Reply, NewState};
+handle_call({?PRODUCE, BrokerId, RequiredAcks, Timeout, Topics},
+            _From, State) ->
+    Reply = handle_produce(State, BrokerId, RequiredAcks, Timeout, Topics),
+    {reply, Reply, State};
 handle_call(?STOP, _From, State) ->
     ?trace("stopping...", []),
     {stop, _Reason = shutdown, _Reply = ok, State};
@@ -158,7 +184,12 @@ reconnect(OldState) ->
     ?trace("reconnecting...", []),
     _OldSeed = random:seed(now()),
     %% close all opened TCP sockets
-    ok = lists:foreach(fun gen_tcp:close/1, OldState#state.sockets),
+    ok = lists:foreach(
+           fun({_BrokerId, Socket}) when is_port(Socket) ->
+                   ok = gen_tcp:close(Socket);
+              (_SocketItem) ->
+                   ok
+           end, OldState#state.sockets),
     %% find first available broker
     case get_metadata_from_first_available_broker(OldState#state.brokers) of
         {ok, Metadata} ->
@@ -192,7 +223,7 @@ schedule_reconnect() ->
 
 %% @doc Try to read metadata from any available broker.
 -spec get_metadata_from_first_available_broker(
-        Brokers :: [kafka:broker()]) -> {ok, #metadata_response{}} | error.
+        Brokers :: [kafka:broker()]) -> {ok, metadata_response()} | error.
 get_metadata_from_first_available_broker([]) ->
     error;
 get_metadata_from_first_available_broker([{Address, PortNumber} | Tail]) ->
@@ -200,7 +231,7 @@ get_metadata_from_first_available_broker([{Address, PortNumber} | Tail]) ->
     %% {packet,4} option implies that the packet header is unsigned
     %% big endian, but Kafka protocol encodes the packet length as
     %% int32, which is SIGNED big endian.
-    TcpOpts = [binary, {packet, 4}, {reuseaddr, true}, {active, false}],
+    TcpOpts = [binary, {packet, 4}, {reuseaddr, true}, {active, true}],
     ?trace("bootstrap: connecting to ~999p:~w...", [Address, PortNumber]),
     case gen_tcp:connect(Address, PortNumber, TcpOpts, ?CONNECT_TIMEOUT) of
         {ok, Socket} ->
@@ -211,7 +242,7 @@ get_metadata_from_first_available_broker([{Address, PortNumber} | Tail]) ->
                 {ok, _Metadata} = Ok ->
                     ok = gen_tcp:close(Socket),
                     Ok;
-                error ->
+                {error, _Reason} ->
                     ok = gen_tcp:close(Socket),
                     get_metadata_from_first_available_broker(Tail)
             end;
@@ -224,53 +255,18 @@ get_metadata_from_first_available_broker([{Address, PortNumber} | Tail]) ->
 
 %% @doc Ask metadata from a broker.
 -spec get_metadata(Socket :: port()) ->
-                          {ok, #metadata_response{}} | error.
+                          {ok, metadata_response()} |
+                          {error, Reason :: any()}.
 get_metadata(Socket) ->
-    %% form the request
-    CorellationId = gen_corellation_id(),
-    MetadataRequest = [], %% ask for metadata for all topics
-    Request = #request{
-      api_key = ?MetadataRequest,
-      corellation_id = CorellationId,
-      client_id = "erlang-kafka-client",
-      message = MetadataRequest
-     },
-    %% encode the request
-    EncodedRequest = kafka_proto:encode(Request),
-    %% send the request and wait for a response
-    ?trace("sending 0x~4.16.0B bytes with CorrId=~w...",
-           [size(EncodedRequest), CorellationId]),
-    case gen_tcp:send(Socket, EncodedRequest) of
-        ok ->
-            case gen_tcp:recv(
-                   Socket, _Length = 0, ?RESPONSE_READ_TIMEOUT) of
-                {ok, EncodedResponse} ->
-                    %% decode the response
-                    Response = kafka_proto:decode(EncodedResponse),
-                    %% check the corellation id
-                    ResponseCorellationId =
-                        Response#response.corellation_id,
-                    if ResponseCorellationId == CorellationId ->
-                            {ok, Response#response.message};
-                       true ->
-                            ?trace(
-                               "corellation ids are not match: ~w /= ~w",
-                               [CorellationId, ResponseCorellationId]),
-                            error
-                    end;
-                {error, _Reason} ->
-                    ?trace(
-                       "failed to receive the response: ~999p",
-                       [_Reason]),
-                    error
-            end;
-        {error, _Reason} ->
-            ?trace("failed to send request: ~999p", [_Reason]),
-            error
-    end.
+    do_sync_request(
+      Socket,
+      _Request = #request{
+        api_key = ?MetadataRequest,
+        message = [] %% ask for metadata for all topics
+       }).
 
 %% @doc Generate a new value for CorrelationId field.
--spec gen_corellation_id() -> kafka_proto:int32().
+-spec gen_corellation_id() -> corellation_id().
 gen_corellation_id() ->
     random:uniform(16#ffffffff + 1) - 2147483648 - 1.
 
@@ -362,3 +358,208 @@ disconnect_broker(OldState, SocketToClose) ->
           end, OldState#state.sockets),
     ok = schedule_broker_reconnect(),
     OldState#state{sockets = NewSockets}.
+
+%% @doc Do metadata request to the Kafka cluster.
+-spec handle_metadata(OldState :: #state{}) ->
+                             {Reply :: ({ok, metadata_response()} |
+                                        {error, Reason :: any()}),
+                              NewState :: #state{}}.
+handle_metadata(OldState) ->
+    %% take first connected broker
+    ActiveSockets =
+        [Socket ||
+            {_BrokerId, Socket} <- OldState#state.sockets,
+            is_port(Socket)],
+    case ActiveSockets of
+        [Socket | _] ->
+            case get_metadata(Socket) of
+                {ok, _Metadata} = Ok ->
+                    {Ok, OldState};
+                {error, _Reason} ->
+                    %% failover to next connected broker
+                    NewState = disconnect_broker(OldState, Socket),
+                    handle_metadata(NewState)
+            end;
+        [] ->
+            %% no active connections present
+            {_Reply = {error, ?not_connected}, OldState}
+    end.
+
+%% @doc Do produce request to the Kafka cluster.
+-spec handle_produce(OldState :: #state{},
+                     BrokerId :: auto | broker_id(),
+                     RequiredAcks :: produce_request_required_acks(),
+                     Timeout :: produce_request_timeout(),
+                     Topics :: produce_request_topics()) ->
+                            {ok, Reply :: produce_response()} |
+                            {error,
+                             leader_search_error_reason() |
+                             ?not_connected |
+                             do_sync_request_error_reason()}.
+handle_produce(State, BrokerId, RequiredAcks, Timeout, Topics) ->
+    ?trace("handle_produce(): topics:~n\t~p", [Topics]),
+    case resolve_leader(BrokerId, State#state.metadata, Topics) of
+        {ok, LeaderId} ->
+            case lookup_socket_by_broker_id(
+                   State#state.sockets, LeaderId) of
+                {ok, Socket} ->
+                    ProduceRequest = #produce_request{
+                      required_acks = RequiredAcks,
+                      timeout = Timeout,
+                      topics = Topics
+                     },
+                    Request = #request{
+                      api_key = ?ProduceRequest,
+                      message = ProduceRequest
+                     },
+                    do_sync_request(Socket, Request);
+                undefined ->
+                    ?trace("broker #~w is not connected", [LeaderId]),
+                    {error, ?not_connected}
+            end;
+        {error, _Reason} = Error ->
+            Error
+    end.
+
+%% @doc Lookup TCP socket by the broker ID.
+-spec lookup_socket_by_broker_id(Sockets :: [socket_item()],
+                                 BrokerId :: broker_id()) ->
+                                        {ok, Socket :: port()} |
+                                        undefined.
+lookup_socket_by_broker_id(Sockets, BrokerId) ->
+    case lists:keyfind(BrokerId, 1, Sockets) of
+        {BrokerId, Socket} when is_port(Socket) ->
+            {ok, Socket};
+        _ ->
+            undefined
+    end.
+
+%% @doc Resolve broker ID (a leader) for the request to send if needed.
+-spec resolve_leader(RequestedBrokerId :: auto | broker_id(),
+                     Metadata :: metadata_response(),
+                     Topics :: produce_request_topics()) ->
+         {ok, BrokerId :: broker_id()} |
+         {error, leader_search_error_reason()}.
+resolve_leader(BrokerId, _Metadata, _Topics) when is_integer(BrokerId) ->
+    ?trace("the leader is set to: ~w", [BrokerId]),
+    {ok, BrokerId};
+resolve_leader(auto, Metadata, Topics) ->
+    ?trace("the leader is not set. Looking for any partition...", []),
+    case get_first_partition(Topics) of
+        {TopicName, PartitionId} ->
+            ?trace(
+               "partition #~w found in topic ~9999p",
+               [PartitionId, TopicName]),
+            get_partition_leader(Metadata, TopicName, PartitionId);
+        undefined ->
+            ?trace("no partition was found (empty request?)", []),
+            {error, ?no_leader_for_empty_request}
+    end.
+
+%% @doc Get first topic-partition pair from the produce request.
+-spec get_first_partition(Topics :: produce_request_topics()) ->
+                                 {topic_name(), partition_id()} |
+                                 undefined.
+get_first_partition(Topics) ->
+    %% Notice:
+    %% It can be useful in future to filter out partitions
+    %% with empty message set as there is nothing to produce
+    %% to the partition.
+    Partitions =
+        [{TopicName, Partition} ||
+            {TopicName, Partitions} <- Topics,
+            {Partition, _MessageSet} <- Partitions],
+    case Partitions of
+        [{_TopicName, _Partition} = Item | _Tail] ->
+            Item;
+        [] ->
+            undefined
+    end.
+
+%% @doc Find a leader for a given topic and partition.
+-spec get_partition_leader(Metadata :: metadata_response(),
+                           TopicName :: topic_name(),
+                           PartitionId :: partition_id()) ->
+         {ok, BrokerId :: broker_id()} |
+         {error, partition_leader_search_error_reason()}.
+get_partition_leader(Metadata, TopicName, PartitionId) ->
+    ?trace(
+       "looking for a leader for ~9999p:~w...",
+       [TopicName, PartitionId]),
+    case lists:keyfind(TopicName, 2, Metadata#metadata_response.topics) of
+        {?NoError, TopicName, Partitions} ->
+            case lists:keyfind(PartitionId, 2, Partitions) of
+                {?NoError, PartitionId, -1, _Replicas, _Isr} ->
+                    ?trace("leader election is in progress", []),
+                    {error, ?leader_election(TopicName, PartitionId)};
+                {?NoError, PartitionId, Leader, _Replicas, _Isr} ->
+                    ?trace("the leader is: ~w", [Leader]),
+                    {ok, Leader};
+                {ErrorCode, PartitionId, _Leader, _Replicas, _Isr} ->
+                    ?trace("partition is not ok. ErrorCode=~w", [ErrorCode]),
+                    {error,
+                     ?partition_error(TopicName, PartitionId, ErrorCode)};
+                false ->
+                    ?trace("no such partition", []),
+                    {error, ?no_such_partition(TopicName, PartitionId)}
+            end;
+        {ErrorCode, TopicName, _Partitions} ->
+            ?trace("topic is not ok. ErrorCode=~w", [ErrorCode]),
+            {error, ?topic_error(TopicName, ErrorCode)};
+        false ->
+            ?trace("no such topic", []),
+            {error, ?no_such_topic(TopicName)}
+    end.
+
+%% @doc Do a synchronous request, wait for a response, receive
+%% it, decode and return as function result.
+-spec do_sync_request(Socket :: port(), Request :: request()) ->
+                             {ok, response()} |
+                             {error, do_sync_request_error_reason()}.
+do_sync_request(Socket, Request) ->
+    CorellationId = gen_corellation_id(),
+    ApiKey = Request#request.api_key,
+    %% encode the request
+    EncodedRequest =
+        kafka_proto:encode(
+          Request#request{
+            corellation_id = CorellationId,
+            client_id = "erlang-kafka-client"
+           }),
+    %% send the request and wait for a response
+    ?trace("sending to ~w 0x~4.16.0B bytes with CorrelationId=~w...",
+           [element(2, inet:peername(Socket)),
+            size(EncodedRequest), CorellationId]),
+    case gen_tcp:send(Socket, EncodedRequest) of
+        ok ->
+            receive
+                {tcp, Socket, EncodedResponse} ->
+                    %% decode the response
+                    Response = kafka_proto:decode(ApiKey, EncodedResponse),
+                    %% check the corellation id
+                    ResponseCorellationId =
+                        Response#response.corellation_id,
+                    if ResponseCorellationId == CorellationId ->
+                            {ok, Response#response.message};
+                       true ->
+                            ?trace(
+                               "corellation ids are not match: ~w /= ~w",
+                               [CorellationId, ResponseCorellationId]),
+                            {error, ?corellation_id_mismatch}
+                    end;
+                {tcp_closed, Socket} ->
+                    ?trace("failed to receive the response: tcp_closed", []),
+                    {error, ?tcp_closed};
+                {tcp_error, Socket, Reason} ->
+                    ?trace(
+                       "failed to receive the response: ~999p",
+                       [Reason]),
+                    {error, Reason}
+            after ?RESPONSE_READ_TIMEOUT ->
+                    ?trace("failed to receive the response: timeout", []),
+                    {error, ?timeout}
+            end;
+        {error, Reason} ->
+            ?trace("failed to send request: ~999p", [Reason]),
+            {error, Reason}
+    end.

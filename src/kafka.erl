@@ -18,6 +18,7 @@
    ]).
 
 -include("kafka.hrl").
+-include("kafka_proto.hrl").
 
 %% --------------------------------------------------------------------
 %% Type definitions
@@ -37,12 +38,7 @@
         nonempty_string() | inet:ip_address().
 
 -type option() ::
-        {topics, [nonempty_string()]}.
-
--type error_reason() ::
-        ?bad_brokers | {?bad_broker, any()} |
-        ?bad_options | {?bad_option, any()} |
-        any().
+        {topics, [topic_name()]}.
 
 %% --------------------------------------------------------------------
 %% API functions
@@ -80,7 +76,7 @@ close(Pid) when is_pid(Pid) ->
 %% @doc Check the broker list.
 -spec check_brokers(Brokers :: [broker()]) ->
                            ok |
-                           {error, {?bad_broker, any()}} |
+                           {error, ?bad_broker(any())} |
                            {error, ?bad_brokers}.
 check_brokers([]) ->
     ok;
@@ -89,7 +85,7 @@ check_brokers([Broker | Tail]) ->
         ok ->
             check_brokers(Tail);
         error ->
-            {error, {?bad_broker, Broker}}
+            {error, ?bad_broker(Broker)}
     end;
 check_brokers(_BadBrokers) ->
     {error, ?bad_brokers}.
@@ -116,7 +112,7 @@ check_broker(_BadBroker) ->
 %% @doc Check the options.
 -spec check_options(Options :: [option()]) ->
                            ok |
-                           {error, {?bad_option, any()}} |
+                           {error, ?bad_option(any())} |
                            {error, ?bad_options}.
 check_options([]) ->
     ok;
@@ -125,7 +121,7 @@ check_options([Option | Tail]) ->
         ok ->
             check_options(Tail);
         error ->
-            {error, {?bad_option, Option}}
+            {error, ?bad_option(Option)}
     end;
 check_options(_BadOptions) ->
     {error, ?bad_options}.
