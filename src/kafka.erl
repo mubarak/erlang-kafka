@@ -15,7 +15,11 @@
 -export(
    [start_link/2,
     start_link/3,
-    close/1
+    hup/1,
+    close/1,
+    metadata/1,
+    produce/5,
+    produce_async/3
    ]).
 
 -include("kafka.hrl").
@@ -29,7 +33,9 @@
    [broker/0,
     broker_address/0,
     option/0,
-    error_reason/0
+    error_reason/0,
+    server_name/0,
+    client_ref/0
    ]).
 
 -type broker() :: {Address :: broker_address(),
@@ -40,6 +46,18 @@
 
 -type option() ::
         {topics, [topic_name()]}.
+
+-type server_name() ::
+        {local, Name :: atom()} |
+        {global, GlobalName :: any()} |
+        {via, Module :: atom(), ViaName :: any()}.
+
+-type client_ref() ::
+        (Name :: atom()) |
+        {Name :: atom(), Node :: node()} |
+        {global, GlobalName :: any()} |
+        {via, Module :: atom(), ViaName :: any()} |
+        pid().
 
 %% --------------------------------------------------------------------
 %% API functions
@@ -61,10 +79,7 @@ start_link(Brokers, Options) ->
 %% @doc Start an named Kafka client in a linked process.
 %% Purpose of ServerName argument you can find at
 %% the gen_server:start_link/4 function description.
--spec start_link(ServerName ::
-                   {local, Name :: atom()} |
-                   {global, GlobalName :: atom()} |
-                   {via, Module :: atom(), ViaName :: atom()},
+-spec start_link(ServerName :: server_name(),
                  Brokers :: [broker()],
                  Options :: [option()]) ->
                         {ok, Pid :: pid()} |
@@ -77,10 +92,40 @@ start_link(ServerName, Brokers, Options) ->
             Error
     end.
 
+%% @doc Reconnect and reread the metadata.
+-spec hup(ClientRef :: client_ref()) -> ok.
+hup(ClientRef) ->
+    kafka_client:hup(ClientRef).
+
 %% @doc Stop the client.
--spec close(Pid :: pid()) -> ok.
-close(Pid) when is_pid(Pid) ->
-    kafka_client:stop(Pid).
+-spec close(ClientRef :: client_ref()) -> ok.
+close(ClientRef) ->
+    kafka_client:stop(ClientRef).
+
+%% @doc Send a produce request.
+-spec metadata(ClientRef :: kafka:client_ref()) ->
+                      {ok, metadata_response()} |
+                      {error, Reason :: any()}.
+metadata(ClientRef) ->
+    kafka_client:metadata(ClientRef).
+
+%% @doc Send a produce request.
+-spec produce(ClientRef :: kafka:client_ref(),
+              BrokerId :: auto | broker_id(),
+              RequiredAcks :: produce_request_required_acks(),
+              Timeout :: produce_request_timeout(),
+              Topics :: produce_request_topics()) ->
+                     {ok, produce_response()} |
+                     {error, produce_error_reason()}.
+produce(ClientRef, BrokerId, RequiredAcks, Timeout, Topics) ->
+    kafka_client:produce(ClientRef, BrokerId, RequiredAcks, Timeout, Topics).
+
+%% @doc Send an asynchronous produce request.
+-spec produce_async(ClientRef :: kafka:client_ref(),
+                    BrokerId :: auto | broker_id(),
+                    Topics :: produce_request_topics()) -> ok.
+produce_async(ClientRef, BrokerId, Topics) ->
+    kafka_client:produce_async(ClientRef, BrokerId, Topics).
 
 %% --------------------------------------------------------------------
 %% Internal functions

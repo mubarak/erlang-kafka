@@ -70,10 +70,7 @@ start_link(Brokers, Options) ->
 %% @doc Start the named linked process.
 %% Purpose of ServerName argument you can find at
 %% the gen_server:start_link/4 function description.
--spec start_link(ServerName ::
-                   {local, Name :: atom()} |
-                   {global, GlobalName :: atom()} |
-                   {via, Module :: atom(), ViaName :: atom()},
+-spec start_link(ServerName :: kafka:server_name(),
                  Brokers :: [kafka:broker()],
                  Options :: [kafka:option()]) ->
                         {ok, Pid :: pid()} |
@@ -84,45 +81,46 @@ start_link(ServerName, Brokers, Options) ->
       _Options = []).
 
 %% @doc Stop the client.
--spec stop(Pid :: pid()) -> ok.
-stop(Pid) ->
-    gen_server:call(Pid, ?STOP).
+-spec stop(ClientRef :: kafka:client_ref()) -> ok.
+stop(ClientRef) ->
+    gen_server:call(ClientRef, ?STOP).
 
 %% @doc Reconnect and reread the metadata.
--spec hup(Pid :: pid()) -> ok.
-hup(Pid) ->
-    gen_server:cast(Pid, ?HUP).
+-spec hup(ClientRef :: kafka:client_ref()) -> ok.
+hup(ClientRef) ->
+    gen_server:cast(ClientRef, ?HUP).
 
 %% @doc Send a produce request.
--spec metadata(Pid :: pid()) ->
+-spec metadata(ClientRef :: kafka:client_ref()) ->
                       {ok, metadata_response()} |
                       {error, Reason :: any()}.
-metadata(Pid) ->
-    gen_server:call(Pid, ?METADATA).
+metadata(ClientRef) ->
+    gen_server:call(ClientRef, ?METADATA).
 
 %% @doc Send a produce request.
--spec produce(Pid :: pid(),
+-spec produce(ClientRef :: kafka:client_ref(),
               BrokerId :: auto | broker_id(),
               RequiredAcks :: produce_request_required_acks(),
               Timeout :: produce_request_timeout(),
               Topics :: produce_request_topics()) ->
                      {ok, produce_response()} |
                      {error, produce_error_reason()}.
-produce(_Pid, _BrokerId, ?NoAcknowledgement, _Timeout, _Topics) ->
+produce(_ClientRef, _BrokerId, ?NoAcknowledgement, _Timeout, _Topics) ->
     %% The caller tries to make synchronous produce request
     %% but the value of RequiredAcks will make it asynchronous.
     %% This definitely will cause timeout waiting for response
     %% from the leader.
     {error, ?bad_req_acks_for_sync_request};
-produce(Pid, BrokerId, RequiredAcks, Timeout, Topics) ->
-    gen_server:call(Pid, {?PRODUCE, BrokerId, RequiredAcks, Timeout, Topics}).
+produce(ClientRef, BrokerId, RequiredAcks, Timeout, Topics) ->
+    gen_server:call(
+      ClientRef, {?PRODUCE, BrokerId, RequiredAcks, Timeout, Topics}).
 
 %% @doc Send an asynchronous produce request.
--spec produce_async(Pid :: pid(),
+-spec produce_async(ClientRef :: kafka:client_ref(),
                     BrokerId :: auto | broker_id(),
                     Topics :: produce_request_topics()) -> ok.
-produce_async(Pid, BrokerId, Topics) ->
-    gen_server:cast(Pid, {?PRODUCE, BrokerId, Topics}).
+produce_async(ClientRef, BrokerId, Topics) ->
+    gen_server:cast(ClientRef, {?PRODUCE, BrokerId, Topics}).
 
 %% ----------------------------------------------------------------------
 %% gen_server callbacks
