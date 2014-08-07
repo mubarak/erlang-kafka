@@ -33,6 +33,11 @@
 %% NULL value
 -define(NULL, null).
 
+%% Values for RequiredAcks field
+-define(AfterClusterCommit, -1).
+-define(NoAcknowledgement, 0). %% for fully asynchronous produce request
+-define(AfterLocalWrite, 1).
+
 %% ----------------------------------------------------------------------
 %% Error codes
 

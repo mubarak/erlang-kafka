@@ -35,6 +35,7 @@
 -define(no_leader_for_empty_request, no_leader_for_empty_request).
 -define(tcp_closed, tcp_closed).
 -define(timeout, timeout).
+-define(bad_req_acks_for_sync_request, bad_req_acks_for_sync_request).
 
 -type error_reason() ::
         ?bad_brokers | ?bad_broker(any()) |
@@ -42,6 +43,12 @@
         ?not_connected |
         ?corellation_id_mismatch |
         leader_search_error_reason().
+
+-type produce_error_reason() ::
+        leader_search_error_reason() |
+        ?not_connected |
+        ?bad_req_acks_for_sync_request |
+        do_sync_request_error_reason().
 
 -type leader_search_error_reason() ::
         ?no_leader_for_empty_request |

@@ -15,7 +15,8 @@
     stop/1,
     hup/1,
     metadata/1,
-    produce/5
+    produce/5,
+    produce_async/3
    ]).
 
 %% gen_server callback exports
@@ -89,9 +90,23 @@ metadata(Pid) ->
               RequiredAcks :: produce_request_required_acks(),
               Timeout :: produce_request_timeout(),
               Topics :: produce_request_topics()) ->
-                     ok | {error, Reason :: any()}.
+                     {ok, produce_response()} |
+                     {error, produce_error_reason()}.
+produce(_Pid, _BrokerId, ?NoAcknowledgement, _Timeout, _Topics) ->
+    %% The caller tries to make synchronous produce request
+    %% but the value of RequiredAcks will make it asynchronous.
+    %% This definitely will cause timeout waiting for response
+    %% from the leader.
+    {error, ?bad_req_acks_for_sync_request};
 produce(Pid, BrokerId, RequiredAcks, Timeout, Topics) ->
     gen_server:call(Pid, {?PRODUCE, BrokerId, RequiredAcks, Timeout, Topics}).
+
+%% @doc Send an asynchronous produce request.
+-spec produce_async(Pid :: pid(),
+                    BrokerId :: auto | broker_id(),
+                    Topics :: produce_request_topics()) -> ok.
+produce_async(Pid, BrokerId, Topics) ->
+    gen_server:cast(Pid, {?PRODUCE, BrokerId, Topics}).
 
 %% ----------------------------------------------------------------------
 %% gen_server callbacks
@@ -121,6 +136,9 @@ init({Brokers, Options}) ->
 %% @hidden
 -spec handle_cast(Request :: any(), State :: #state{}) ->
                          {noreply, NewState :: #state{}}.
+handle_cast({?PRODUCE, BrokerId, Topics}, State) ->
+    ok = handle_produce_async(State, BrokerId, Topics),
+    {noreply, State};
 handle_cast(?HUP, State) ->
     NewState = reconnect(State),
     {noreply, NewState};
@@ -421,6 +439,34 @@ handle_produce(State, BrokerId, RequiredAcks, Timeout, Topics) ->
             Error
     end.
 
+%% @doc Do produce request to the Kafka cluster.
+-spec handle_produce_async(State :: #state{},
+                           BrokerId :: auto | broker_id(),
+                           Topics :: produce_request_topics()) -> ok.
+handle_produce_async(State, BrokerId, Topics) ->
+    ?trace("handle_produce_async(): topics:~n\t~p", [Topics]),
+    case resolve_leader(BrokerId, State#state.metadata, Topics) of
+        {ok, LeaderId} ->
+            case lookup_socket_by_broker_id(
+                   State#state.sockets, LeaderId) of
+                {ok, Socket} ->
+                    ProduceRequest = #produce_request{
+                      required_acks = ?NoAcknowledgement,
+                      timeout = 0,
+                      topics = Topics
+                     },
+                    Request = #request{
+                      api_key = ?ProduceRequest,
+                      message = ProduceRequest
+                     },
+                    do_async_request(Socket, Request);
+                undefined ->
+                    ?trace("broker #~w is not connected", [LeaderId])
+            end;
+        {error, _Reason} ->
+            ok
+    end.
+
 %% @doc Lookup TCP socket by the broker ID.
 -spec lookup_socket_by_broker_id(Sockets :: [socket_item()],
                                  BrokerId :: broker_id()) ->
@@ -562,4 +608,27 @@ do_sync_request(Socket, Request) ->
         {error, Reason} ->
             ?trace("failed to send request: ~999p", [Reason]),
             {error, Reason}
+    end.
+
+%% @doc Do an asynchronous request.
+-spec do_async_request(Socket :: port(), Request :: request()) -> ok.
+do_async_request(Socket, Request) ->
+    CorellationId = gen_corellation_id(),
+    %% encode the request
+    EncodedRequest =
+        kafka_proto:encode(
+          Request#request{
+            corellation_id = CorellationId,
+            client_id = "erlang-kafka-client"
+           }),
+    %% send the request and wait for a response
+    ?trace("sending to ~w 0x~4.16.0B bytes with CorrelationId=~w...",
+           [element(2, inet:peername(Socket)),
+            size(EncodedRequest), CorellationId]),
+    case gen_tcp:send(Socket, EncodedRequest) of
+        ok ->
+            ok;
+        {error, _Reason} ->
+            ?trace("failed to send request: ~999p", [_Reason]),
+            ok
     end.
