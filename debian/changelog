@@ -1,5 +1,5 @@
-erlang-kafka (0.1.0-1) unstable; urgency=low
+erlang-kafka (0.2.0-1) unstable; urgency=low
 
   * Initial release.
 
- -- Aleksey Morarash <aleksey.morarash@proffero.com>  Mon, 04 Aug 2014 20:48:00 +0300
+ -- Aleksey Morarash <aleksey.morarash@proffero.com>  Thu, 07 Aug 2014 11:36:00 +0300
