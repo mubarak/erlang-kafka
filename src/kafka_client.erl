@@ -418,7 +418,7 @@ handle_metadata(OldState) ->
     end.
 
 %% @doc Do produce request to the Kafka cluster.
--spec handle_produce(OldState :: #state{},
+-spec handle_produce(State :: #state{},
                      BrokerId :: auto | broker_id(),
                      RequiredAcks :: produce_request_required_acks(),
                      Timeout :: produce_request_timeout(),
