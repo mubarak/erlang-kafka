@@ -67,7 +67,7 @@
 -spec start_link(Brokers :: [broker()],
                  Options :: [option()]) ->
                         {ok, Pid :: pid()} |
-                        {error, Reason :: error_reason()}.
+                        {error, Reason :: start_error_reason()}.
 start_link(Brokers, Options) ->
     case check_start_args(Brokers, Options) of
         ok ->
@@ -83,7 +83,7 @@ start_link(Brokers, Options) ->
                  Brokers :: [broker()],
                  Options :: [option()]) ->
                         {ok, Pid :: pid()} |
-                        {error, Reason :: error_reason()}.
+                        {error, Reason :: start_error_reason()}.
 start_link(ServerName, Brokers, Options) ->
     case check_start_args(Brokers, Options) of
         ok ->
@@ -135,11 +135,7 @@ produce_async(ClientRef, BrokerId, Topics) ->
 -spec check_start_args(Broker :: [broker()],
                        Options :: [option()]) ->
                               ok |
-                              {error,
-                               ?bad_broker(any()) |
-                               ?bad_brokers |
-                               ?bad_option(any()) |
-                               ?bad_options}.
+                              {error, start_error_reason()}.
 check_start_args([], _Options) ->
     {error, ?bad_brokers};
 check_start_args(Brokers, Options) ->

@@ -38,15 +38,20 @@
 -define(bad_req_acks_for_sync_request, bad_req_acks_for_sync_request).
 
 -type error_reason() ::
-        ?bad_brokers | ?bad_broker(any()) |
-        ?bad_options | ?bad_option(any()) |
+        start_error_reason() |
         ?not_connected |
-        ?corellation_id_mismatch |
-        leader_search_error_reason().
+        produce_error_reason().
+
+-type start_error_reason() ::
+        ?bad_brokers |
+        ?bad_broker(any()) |
+        ?bad_options |
+        ?bad_option(any()).
 
 -type produce_error_reason() ::
         leader_search_error_reason() |
         ?not_connected |
+        ?corellation_id_mismatch |
         ?bad_req_acks_for_sync_request |
         do_sync_request_error_reason().
 
